@@ -9,7 +9,7 @@ echo "Building strix-halo-toolbox image..."
 set -e
 
 podman build \
-  -t strix-halo-toolbox:rocm-7.2.1-fedora-43 \
+  -t strix-halo-toolbox:rocm-7.2.2-fedora-43 \
   -t strix-halo-toolbox:latest \
   .
 

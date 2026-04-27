@@ -6,7 +6,7 @@
 # RUN THIS OUTSIDE THE CONTAINER!
 # ==================================================================================================
 
-CONTAINER_NAME=${1:-rocm-7.2.1}
+CONTAINER_NAME=${1:-rocm-7.2.2}
 
 echo "Destroying container $CONTAINER_NAME..."
 toolbox rm -f "$CONTAINER_NAME"
