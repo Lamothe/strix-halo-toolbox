@@ -1,6 +1,6 @@
 # Strix Halo Toolbox
 
-A ROCm 7.2.2 container environment for the Strix Halo with a working implementation of [TRELLIS.2](https://github.com/microsoft/TRELLIS.2) from Microsoft.
+A ROCm 7.2.3 container environment for the Strix Halo with a working implementation of [TRELLIS.2](https://github.com/microsoft/TRELLIS.2) from Microsoft.
 
 Tested on:
 
