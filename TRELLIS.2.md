@@ -3,9 +3,13 @@
 ## Overview
 This document describes the TRELLIS.2 port to ROCm (AMD GPU) for the Strix Halo toolbox.
 
-## Key Finding: Patchy Texture Issue
+## Summary
+A debugging session was conducted to investigate a "patchy" texture issue in TRELLIS.2 ROCm. The issue was caused by nvdiffrast's ROCm port having a bug in the `__ballot_sync` macro. The fix involved modifying the macro to properly handle 64-lane wavefronts on AMD GPUs.
 
-### Problem Description
+## Key Discoveries
+
+## Issue: Patchy Texture in example.py vs Perfect Texture in example_texturing.py
+
 The `example.py` script produced "patchy" texture results while `example_texturing.py` produced perfect results. Both scripts use TRELLIS.2 for 3D generation, but differ in their texturing approach:
 
 | Script | Texturing Method | Results |
@@ -14,13 +18,9 @@ The `example.py` script produced "patchy" texture results while `example_texturi
 | `example_texturing.py` | Uses custom PyTorch/OpenCV rasterizer | Perfect |
 
 ### Root Cause
-The patchy texture issue was caused by nvdiffrast's ROCm port having a bug in the `__ballot_sync` macro that improperly handles 64-lane wavefronts on AMD GPUs.
 
-**Impact on `example.py`:**
-- Uses `MeshRenderer` which enables `antialias=True` by default
-- Antialiasing uses warp-level coordination via `__ballot_sync`
-- The buggy macro caused incorrect lane participation in warp-level operations
-- This resulted in incorrect barycentric coordinate calculations and patchy textures
+**Root Cause:**
+The patchy texture issue was caused by nvdiffrast's ROCm port having a bug in the `__ballot_sync` macro that improperly handles 64-lane wavefronts on AMD GPUs.
 
 ### Solution
 Applied the fix from `nvdiffrast_rocm/csrc/common/antialias.hip`:
@@ -72,3 +72,41 @@ The fix ensures correct warp-level coordination in the antialiasing kernel, whic
 - nvdiffrast ROCm fix: `nvdiffrast.md`
 - TRELLIS.2 main repo: https://github.com/microsoft/TRELLIS.2
 - ROCm documentation: https://rocm.docs.amd.com/
+
+---
+
+## Debugging Instructions (For Future Work)
+
+When debugging TRELLIS.2 ROCm rendering issues, follow this workflow:
+
+### Step 1: Determine if the issue is in nvdiffrast
+- If `example.py` produces patchy textures but `example_texturing.py` produces perfect textures → the issue is almost certainly in nvdiffrast's warp-level coordination (antialiasing kernel using `__ballot_sync`)
+- If both examples are affected → the issue may be in the 3D generation or post-processing pipeline
+
+### Step 2: Check nvdiffrast tests first
+Before modifying TRELLIS.2 code, verify nvdiffrast itself works correctly:
+```bash
+cd /home/michael/Projects/strix-halo-toolbox/nvdiffrast_rocm
+python -c "import nvdiffrast.torch as dr; print('nvdiffrast imports successfully')"
+```
+
+### Step 3: Look at the nvdiffrast.md file
+The `nvdiffrast.md` file in this repository contains:
+1. Known issues and their solutions
+2. The strict TDD loop for kernel debugging
+3. Instructions for writing test harnesses
+4. Verification methodology
+
+### Step 4: If nvdiffrast is confirmed buggy, use the TDD loop
+See `nvdiffrast.md` for the detailed Test-Driven Development loop:
+1. Write minimal Python test harness
+2. Make ONE targeted fix to HIP kernel code
+3. Recompile and verify with numerical comparison
+4. If fix fails, immediately `git restore` the change
+5. Repeat until proven fix (diff == 0.0)
+
+### Important Rules
+- Do not modify TRELLIS.2 code to work around nvdiffrast bugs - fix nvdiffrast directly
+- Always verify fixes with numerical comparison against CUDA baseline
+- If a fix doesn't improve the numerical diff, immediately revert with `git -C nvdiffrast_rocm restore <filename>`
+- Document all fixes in `nvdiffrast.md` with the final test output
