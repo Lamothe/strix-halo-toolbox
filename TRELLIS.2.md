@@ -3,52 +3,56 @@
 ## Overview
 This document describes the TRELLIS.2 port to ROCm (AMD GPU) for the Strix Halo toolbox.
 
-## Summary
-A debugging session was conducted to investigate a "patchy" texture issue in TRELLIS.2 ROCm. The issue was caused by nvdiffrast's ROCm port having a bug in the `__ballot_sync` macro. The fix involved modifying the macro to properly handle 64-lane wavefronts on AMD GPUs.
+---
 
-## Key Discoveries
+## Issue: Garbled Textures in GLB Export
 
-## Issue: Patchy Texture in example.py vs Perfect Texture in example_texturing.py
+The `example.py` script produces **completely garbled textures** (correct geometry, garbage texture). The warp-level sync fixes in nvdiffrast did NOT resolve this issue.
 
-The `example.py` script produced "patchy" texture results while `example_texturing.py` produced perfect results. Both scripts use TRELLIS.2 for 3D generation, but differ in their texturing approach:
+### What Works
+- 3D mesh generation ✅
+- UV unwrapping ✅
+- Mesh topology ✅
+- nvdiffrast triangle rasterization test ✅
 
-| Script | Texturing Method | Results |
-|--------|-----------------|---------|
-| `example.py` | Uses `MeshRenderer` with nvdiffrast | Patchy (broken) |
-| `example_texturing.py` | Uses custom PyTorch/OpenCV rasterizer | Perfect |
+### What's Broken
+- Texture baking in `o_voxel.postprocess.to_glb()` — produces fragmented, noisy texture output
 
-### Root Cause
+---
 
-**Root Cause:**
-The patchy texture issue was caused by nvdiffrast's ROCm port having a bug in the `__ballot_sync` macro that improperly handles 64-lane wavefronts on AMD GPUs.
+## Texture Baking Pipeline Analysis
 
-### Solution
-Applied the fix from `nvdiffrast_rocm/csrc/common/antialias.hip`:
-- Replaced simple `__ballot(predicate)` with `WAVE32_BALLOT(predicate)`
-- Properly extracts 32-bit mask for each 32-lane sub-wave on 64-lane AMD GPUs
-- Verified by running nvdiffrast tests successfully
+The `to_glb()` function uses this pipeline for texture baking:
 
-### Files Modified
-| File | Change |
-|------|--------|
-| `nvdiffrast_rocm/csrc/common/antialias.hip` | Fixed `__ballot_sync` macro using `WAVE32_BALLOT` |
-| `TRELLIS.2_rocm/example.py` | Commented out video rendering (nvdiffrast preview) for ROCm |
+```
+1. UV rasterization: dr.rasterize(ctx, uvs_rast, faces, resolution=[2048, 2048])
+   → Produces rast output mapping each texel to a triangle
 
-### Verification
-Both examples now work correctly:
-- ✅ `example.py`: Generates `sample.glb` (37 MB, 813K vertices)
-- ✅ `example_texturing.py`: Generates `textured.glb` (10.7 MB, 2.7M pixels rasterized)
+2. Position interpolation: dr.interpolate(out_vertices, rast, faces)
+   → Interpolates 3D vertex positions per texel
 
-### Current Status
-**Working:**
-- 3D mesh generation
-- GLB export with PBR materials
-- Antialiasing (when enabled)
-- Rasterization via nvdiffrast
+3. Back-projection to original mesh: bvh.unsigned_distance(valid_pos, return_uvw=True)
+   → Maps simplified mesh positions back to original high-res mesh
 
-**Known Limitations (by design):**
-- Video rendering disabled for ROCm (uses `render_video` which has additional nvdiffrast dependencies)
-- Snapshot preview rendering disabled (uses `render_snapshot`)
+4. Volume sampling: grid_sample_3d(attr_volume, grid=positions)
+   → Samples color/material attributes from the 3D voxel volume
+
+5. Post-processing: cv2.inpaint()
+   → Fills UV seams with OpenCV inpainting
+```
+
+**The geometry is correct** (UVs unwrap properly, mesh topology is fine), but the **texture sampling produces garbage** (fragmented letters, random noise patterns).
+
+### Likely Culprits (In Order of Suspicion)
+
+| # | Suspect | Why |
+|---|---------|-----|
+| 1 | `grid_sample_3d` from flex_gemm | Trilinear volume sampling is a custom triton kernel — most likely source of garbage output |
+| 2 | `dr.interpolate` for UV→position mapping | The triangle test doesn't exercise the UV-space rasterization path used by to_glb() |
+| 3 | `dr.texture` with mipmapping | Used by MeshRenderer/PbrMeshRenderer, not by to_glb() directly |
+| 4 | UV rasterization in UV space | `uvs_rast = out_uvs * 2 - 1` converts UVs to NDC — could have coordinate issues |
+
+---
 
 ## Technical Details
 
@@ -59,54 +63,38 @@ Both examples now work correctly:
 | `__ballot` | Returns 32-bit | Returns 64-bit |
 | `__ballot_sync` | Native warp sync | Requires sub-wave handling |
 
-### Rasterization Pipeline
-```
-TRELLIS.2 → Mesh → nvdiffrast rasterize() → barycentric coords
-           ↓
-       interpolate() → texture sampling → PBR materials → GLB export
-```
+### nvdiffrast Warp-Level Fixes (Applied, Not Root Cause)
+All five warp-level sync bugs were fixed in nvdiffrast. The triangle test passes, but the texture corruption persists, indicating the issue is **downstream of core rasterization**.
 
-The fix ensures correct warp-level coordination in the antialiasing kernel, which is part of the interpolation pipeline.
+See `nvdiffrast.md` for details.
+
+---
 
 ## References
-- nvdiffrast ROCm fix: `nvdiffrast.md`
+- nvdiffrast ROCm bugs and fixes: `nvdiffrast.md`
 - TRELLIS.2 main repo: https://github.com/microsoft/TRELLIS.2
+- o-voxel postprocess: `TRELLIS.2_rocm/o-voxel/o_voxel/postprocess.py`
+- flex_gemm grid_sample: `FlexGEMM_rocm/flex_gemm/ops/grid_sample/`
 - ROCm documentation: https://rocm.docs.amd.com/
 
 ---
 
-## Debugging Instructions (For Future Work)
+## Debugging Instructions
 
-When debugging TRELLIS.2 ROCm rendering issues, follow this workflow:
+### Step 1: Isolate the broken component
+Test each stage of the texture baking pipeline independently:
+1. Verify UV rasterization produces correct rast output
+2. Verify `dr.interpolate` produces correct 3D positions per texel
+3. Verify `grid_sample_3d` produces correct attribute values from known positions
+4. Verify the back-projection from simplified mesh to original mesh
 
-### Step 1: Determine if the issue is in nvdiffrast
-- If `example.py` produces patchy textures but `example_texturing.py` produces perfect textures → the issue is almost certainly in nvdiffrast's warp-level coordination (antialiasing kernel using `__ballot_sync`)
-- If both examples are affected → the issue may be in the 3D generation or post-processing pipeline
+### Step 2: Focus on flex_gemm grid_sample_3d
+The `grid_sample_3d` operation is the most likely culprit — it's a custom triton kernel for trilinear volume sampling, and the garbage pattern (fragmented noise) is consistent with incorrect volume sampling.
 
-### Step 2: Check nvdiffrast tests first
-Before modifying TRELLIS.2 code, verify nvdiffrast itself works correctly:
-```bash
-cd /home/michael/Projects/strix-halo-toolbox/nvdiffrast_rocm
-python -c "import nvdiffrast.torch as dr; print('nvdiffrast imports successfully')"
-```
-
-### Step 3: Look at the nvdiffrast.md file
-The `nvdiffrast.md` file in this repository contains:
-1. Known issues and their solutions
-2. The strict TDD loop for kernel debugging
-3. Instructions for writing test harnesses
-4. Verification methodology
-
-### Step 4: If nvdiffrast is confirmed buggy, use the TDD loop
-See `nvdiffrast.md` for the detailed Test-Driven Development loop:
-1. Write minimal Python test harness
-2. Make ONE targeted fix to HIP kernel code
-3. Recompile and verify with numerical comparison
-4. If fix fails, immediately `git restore` the change
-5. Repeat until proven fix (diff == 0.0)
+### Step 3: Test with PyTorch fallback
+Compare `flex_gemm.grid_sample_3d()` output against `torch.nn.functional.grid_sample()` on the same inputs to identify discrepancies.
 
 ### Important Rules
-- Do not modify TRELLIS.2 code to work around nvdiffrast bugs - fix nvdiffrast directly
-- Always verify fixes with numerical comparison against CUDA baseline
-- If a fix doesn't improve the numerical diff, immediately revert with `git -C nvdiffrast_rocm restore <filename>`
-- Document all fixes in `nvdiffrast.md` with the final test output
+- Always verify fixes with the actual TRELLIS.2 output, not just unit tests
+- If a fix doesn't improve the texture output, immediately revert
+- Document all findings in this file
