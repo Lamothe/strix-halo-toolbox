@@ -57,9 +57,4 @@ cd TRELLIS.2_rocm/o-voxel
 pip install . --no-build-isolation
 cd ../..
 
-echo "Installing ComfyUI Dependencies"
-cd ComfyUI
-pip install -r requirements.txt
-cd ..
-
 echo "Setup complete!"
