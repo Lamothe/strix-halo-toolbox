@@ -25,4 +25,5 @@ export CXX=/opt/rocm/bin/hipcc
 export CC=/opt/rocm/bin/hipcc
 export CFLAGS="-fcf-protection=none -Wno-narrowing"
 export CXXFLAGS="-fcf-protection=none -Wno-narrowing"
+export TORCH_DONT_CHECK_COMPILER_ABI=1
 export HSA_XNACK=1

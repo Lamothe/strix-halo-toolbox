@@ -7,9 +7,6 @@
 [submodule "FlexGEMM_rocm"]
 	path = FlexGEMM_rocm
 	url = git@github.com:Lamothe/FlexGEMM_rocm
-[submodule "ComfyUI"]
-	path = ComfyUI
-	url = git@github.com:Comfy-Org/ComfyUI
 [submodule "TRELLIS.2_rocm"]
 	path = TRELLIS.2_rocm
 	url = git@github.com:Lamothe/TRELLIS.2_rocm

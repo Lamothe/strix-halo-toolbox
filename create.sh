@@ -4,7 +4,7 @@
 # create.sh - Create a container for TRELLIS.2 on the Strix Halo.
 # ==================================================================================================
 
-CONTAINER_NAME=${1:-rocm-7.2.3}
+CONTAINER_NAME=${1:-rocm-7.2.4}
 
 toolbox create "$CONTAINER_NAME" \
   --image localhost/strix-halo-toolbox:latest \
