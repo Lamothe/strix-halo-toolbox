@@ -68,9 +68,9 @@ cd nvdiffrast_rocm
 pip install . --no-build-isolation
 cd ..
 
-echo "Installing o-voxel"
+echo "Installing o-voxel (editable)"
 cd TRELLIS.2_rocm/o-voxel
-pip install . --no-build-isolation
+pip install -e . --no-build-isolation
 cd ../..
 
 echo "Setup complete!"

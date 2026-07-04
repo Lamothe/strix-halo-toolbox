@@ -20,7 +20,7 @@ export ROCM_HOME=/opt/rocm
 export HIP_PATH=/opt/rocm
 export FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE
 export PYTORCH_ALLOC_CONF="expandable_segments:True"
-export PYTHONPATH=$(pwd)/TRELLIS.2/o-voxel
+
 export CXX=/opt/rocm/bin/hipcc
 export CC=/opt/rocm/bin/hipcc
 export CFLAGS="-fcf-protection=none -Wno-narrowing"

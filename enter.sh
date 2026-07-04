@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # ==================================================================================================
-# enter.sh - Enter the container and automatically apply configurations.
+# enter.sh - Enter the container.
+# Run '. configure.sh' after entering to activate the venv and set environment variables.
 # ==================================================================================================
 
 CONTAINER_NAME=${1:-rocm-7.2.4}
 
-# This enters the container, sources configure.sh, and drops you into a persistent bash prompt
-toolbox run --container "$CONTAINER_NAME" bash -c "source configure.sh && exec bash"
+toolbox run --container "$CONTAINER_NAME" bash
